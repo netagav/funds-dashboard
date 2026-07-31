@@ -1,0 +1,6 @@
+streamlit>=1.36
+pandas>=2.0
+numpy>=1.24
+# הבאים נדרשים רק במשרד עבור USE_SQL=True (לא נדרש לבית/ענן):
+# pyodbc>=5.0
+# sqlalchemy>=2.0
