@@ -215,27 +215,38 @@ def render(g, label_col, label_name, market_share=False):
 # --------------------------- טבלה 1 - לפי מנהל ---------------------------
 st.subheader("👥 לפי מנהל קרן")
 
-# יצירת רשימה דינמית של קטגוריות העל מתוך הנתונים (ללא ערכים ריקים)
-super_classes = ["הכל"] + sorted(base["SuperClass"].dropna().unique().tolist())
+# יצירת רשימה דינמית של קטגוריות העל מתוך הנתונים (הפעם ללא המילה "הכל")
+super_classes = sorted(base["SuperClass"].dropna().unique().tolist())
+fund_types = ["מחקה", "סל", "כספית", "אקטיבית"]
 
-# סידור 3 מסננים בשורה אחת
+# סידור המסננים בשורה אחת
 col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 3])
+
 with col_f1:
-    mgr_type_opt = st.selectbox("סינון סוג קרן", ["הכל", "מחקה", "סל", "כספית", "אקטיבית"], key="mgr_type")
+    # שימוש ב-multiselect. placeholder מציג טקסט כשהשדה ריק
+    mgr_type_opt = st.multiselect("סינון סוג קרן", fund_types, placeholder="הכל (בחר כדי לסנן)", key="mgr_type")
 with col_f2:
+    # את ההוסטינג נשאיר כרגע כ-selectbox כי יש רק מעט אופציות
     mgr_host_opt = st.selectbox("סינון הוסטינג", ["הכל", "ללא הוסטינג", "הוסטינג"], key="mgr_host")
 with col_f3:
-    mgr_super_opt = st.selectbox("סינון קטגוריית על", super_classes, key="mgr_super")
+    # שימוש ב-multiselect גם לקטגוריית על
+    mgr_super_opt = st.multiselect("סינון קטגוריית על", super_classes, placeholder="הכל (בחר כדי לסנן)", key="mgr_super")
 
-# החלת כל המסננים שנבחרו על נתוני הטבלה
-scope_mgr = base
-if mgr_type_opt != "הכל":
-    scope_mgr = scope_mgr[scope_mgr["FundType"] == mgr_type_opt]
+# הכנת הנתונים
+scope_mgr = base.copy()
+scope_mgr["ManagerCmp"] = scope_mgr["ManagerCmp"].fillna("לא ידוע/טרם סווג")
+
+# החלת מסננים - שים לב לשינוי בלוגיקה
+if mgr_type_opt:  # אם הרשימה לא ריקה (כלומר המשתמש בחר לפחות אופציה אחת)
+    scope_mgr = scope_mgr[scope_mgr["FundType"].isin(mgr_type_opt)]
+    
 if mgr_host_opt != "הכל":
     scope_mgr = scope_mgr[scope_mgr["IsHosting"] == mgr_host_opt]
-if mgr_super_opt != "הכל":
-    scope_mgr = scope_mgr[scope_mgr["SuperClass"] == mgr_super_opt]
+    
+if mgr_super_opt: # אם הרשימה לא ריקה
+    scope_mgr = scope_mgr[scope_mgr["SuperClass"].isin(mgr_super_opt)]
 
+# יצירת הטבלה והצגתה
 m = agg_by(scope_mgr, "ManagerCmp").sort_values("aum_m", ascending=False)
 render(m, "ManagerCmp", "מנהל", market_share=True)
 
