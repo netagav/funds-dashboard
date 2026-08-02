@@ -3,6 +3,8 @@
 """
 
 import io
+import os
+import glob
 import contextlib
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from month_diff import available_months, month_diff, cross_check_with_maya
 from maya_check import download_maya, load_maya_file, reconcile
 
 MAYA_DIR = Path(__file__).resolve().parent / "data" / "maya"
+FUNDS_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 st.set_page_config(page_title="דשבורד קרנות", layout="wide")
 
@@ -84,8 +87,12 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+def _data_signature() -> tuple:
+    files = sorted(glob.glob(str(FUNDS_DATA_DIR / "funds_*.csv")))
+    return tuple((f, os.path.getmtime(f)) for f in files)
+
 @st.cache_data
-def get_data() -> pd.DataFrame:
+def get_data(signature: tuple) -> pd.DataFrame:
     df = load_data()
     return add_helper_columns(df)
 
@@ -98,7 +105,7 @@ def get_maya(latest_month: str) -> pd.DataFrame:
         return load_maya_file(path)
     return download_maya(save_to=path)
 
-df = get_data()
+df = get_data(_data_signature())
 
 # --------------------------- סיידבר: ניווט, חודש ואימות ---------------------------
 
