@@ -234,6 +234,34 @@ def render(g, label_col, label_name, market_share=False, highlight_row=None):
         height=(len(out) + 1) * 35
     )
 
+def render_diff(frame: pd.DataFrame):
+    fixed_cols = [c for c in ["FundBno", "ShortName", "ManagerCmp", "SuperClass", "fdAUM"] if c in frame.columns]
+    extra_cols = [c for c in frame.columns if c not in fixed_cols]
+
+    out = frame[fixed_cols + extra_cols].copy()
+    if "FundBno" in out.columns:
+        out["FundBno"] = out["FundBno"].apply(lambda v: str(int(v)) if pd.notna(v) else "")
+    out = out[out.columns[::-1]]
+
+    total_row = {c: "" for c in out.columns}
+    if "FundBno" in out.columns:
+        total_row["FundBno"] = 'סה"כ'
+    if "fdAUM" in out.columns:
+        total_row["fdAUM"] = frame["fdAUM"].sum(skipna=True)
+    out = pd.concat([out, pd.DataFrame([total_row])], ignore_index=True)
+
+    def highlight_total(row):
+        if "FundBno" in row.index and row["FundBno"] == 'סה"כ':
+            return ['background-color: #2A2A35; font-weight: bold; color: #4DA6FF'] * len(row)
+        return [''] * len(row)
+
+    st.dataframe(
+        out.style.apply(highlight_total, axis=1),
+        use_container_width=True,
+        hide_index=True,
+        height=(min(len(out), 13) + 1) * 35
+    )
+
 # --------------------------- טבלה 1 - לפי מנהל ---------------------------
 st.subheader("👥 לפי מנהל קרן")
 
@@ -292,38 +320,36 @@ mts = available_months(df)
 if len(mts) < 2:
     st.info("צריך לפחות שני חודשים בנתונים כדי להשוות. הסעיף יופיע אוטומטית כשייכנס החודש הבא.")
 else:
-    c1, c2, c3 = st.columns([2, 2, 2])
+    c1, c2 = st.columns([2, 2])
     with c1:
-        m_old = st.selectbox("חודש בסיס", mts, index=len(mts) - 2, key="diff_old")
-    with c2:
         m_new = st.selectbox("חודש להשוואה", mts, index=len(mts) - 1, key="diff_new")
-    with c3:
-        use_maya = st.checkbox("הצלב מול המאיה", key="diff_maya")
+    diff_idx = mts.index(m_new)
 
-    d = month_diff(df, m_old, m_new)
+    if diff_idx == 0:
+        st.info("אין חודש קודם להשוואה")
+    else:
+        m_old = mts[diff_idx - 1]
+        with c2:
+            use_maya = st.checkbox("הצלב מול המאיה", key="diff_maya")
 
-    if use_maya:
-        maya_df = get_maya(mts[-1])
-        if maya_df is None:
-            st.info("אין snapshot של המאיה לחודש זה")
-        else:
-            d = cross_check_with_maya(d, maya_df)
+        d = month_diff(df, m_old, m_new)
 
-    k1, k2 = st.columns(2)
-    k1.metric("יצאו (פורקו/נסגרו)", f"{d['counts']['exited']:,}")
-    k2.metric("נכנסו (חדשות)", f"{d['counts']['entered']:,}")
+        if use_maya:
+            maya_df = get_maya(m_new)
+            if maya_df is None:
+                st.info("אין snapshot של המאיה לחודש זה")
+            else:
+                d = cross_check_with_maya(d, maya_df)
 
-    st.markdown("**קרנות שיצאו** (היו בחודש הבסיס, אינן בחודש ההשוואה):")
-    st.dataframe(
-        d["exited"], use_container_width=True, hide_index=True,
-        height=(min(len(d["exited"]), 12) + 1) * 35
-    )
+        k1, k2 = st.columns(2)
+        k1.metric("יצאו (פורקו/נסגרו)", f"{d['counts']['exited']:,}")
+        k2.metric("נכנסו (חדשות)", f"{d['counts']['entered']:,}")
 
-    st.markdown("**קרנות שנכנסו** (בחודש ההשוואה, לא היו בבסיס):")
-    st.dataframe(
-        d["entered"], use_container_width=True, hide_index=True,
-        height=(min(len(d["entered"]), 12) + 1) * 35
-    )
+        st.markdown("**קרנות שיצאו** (היו בחודש הבסיס, אינן בחודש ההשוואה):")
+        render_diff(d["exited"])
+
+        st.markdown("**קרנות שנכנסו** (בחודש ההשוואה, לא היו בבסיס):")
+        render_diff(d["entered"])
 
 # --------------------------- ייצוא נתונים ואימות (בסיידבר) ---------------------------
 csv_data = base.to_csv(index=False).encode('utf-8-sig')

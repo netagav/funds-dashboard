@@ -71,30 +71,30 @@ def month_diff(df: pd.DataFrame, month_old: str, month_new: str) -> dict:
 
 
 def cross_check_with_maya(diff_result: dict, maya_df: pd.DataFrame) -> dict:
-    """מוסיף לכל טבלה עמודת 'במאיה_היום' + פרשנות רכה.
+    """מוסיף לכל טבלה עמודת 'במאיה_החודש' + פרשנות רכה.
     המאיה = תמונת מצב עדכנית, ולכן זו אינדיקציה, לא הוכחה."""
     maya_ids = set(maya_df["FundNumber"].dropna().astype(int))
 
     def annotate(frame: pd.DataFrame, kind: str) -> pd.DataFrame:
         f = frame.copy()
         if f.empty:
-            f["במאיה_היום"] = pd.Series(dtype="boolean")
+            f["במאיה_החודש"] = pd.Series(dtype="boolean")
             f["פרשנות"] = pd.Series(dtype="string")
             return f
-        f["במאיה_היום"] = (
+        f["במאיה_החודש"] = (
             pd.to_numeric(f[FUND_ID], errors="coerce").astype("Int64").isin(maya_ids)
         )
         if kind == "exited":
             mapping = {
-                True: "עדיין במאיה — ייתכן שהצילום החדש פספס",
+                True: "עדיין במאיה של החודש — ייתכן שהצילום החדש פספס",
                 False: "גם לא במאיה — עקבי עם פירוק/סגירה",
             }
         else:  # entered
             mapping = {
-                True: "קיימת במאיה — עקבי עם קרן חדשה",
+                True: "קיימת במאיה של החודש — עקבי עם קרן חדשה",
                 False: "לא במאיה — לבדוק",
             }
-        f["פרשנות"] = f["במאיה_היום"].map(mapping)
+        f["פרשנות"] = f["במאיה_החודש"].map(mapping)
         return f
 
     return {
