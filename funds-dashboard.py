@@ -17,7 +17,7 @@ from processing import (
     FUND_TYPES, ASSET_LABEL,
 )
 from month_diff import available_months, month_diff, cross_check_with_maya
-from maya_check import download_maya, load_maya_file, reconcile
+from maya_check import load_maya_file, reconcile
 
 MAYA_DIR = Path(__file__).resolve().parent / "data" / "maya"
 FUNDS_DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -97,13 +97,13 @@ def get_data(signature: tuple) -> pd.DataFrame:
     return add_helper_columns(df)
 
 @st.cache_data(show_spinner=False)
-def get_maya(latest_month: str) -> pd.DataFrame:
+def get_maya(latest_month: str):
     """קורא את snapshot המאיה של החודש מהגיט (קפוא). אם אין קובץ לחודש הזה —
-    מוריד חי פעם אחת (fallback לא-קפוא, עד שירוץ refresh_maya וייעשה commit)."""
+    מחזיר None (הורדה חיה נעשית רק ב-refresh_maya, לא כאן)."""
     path = MAYA_DIR / f"maya_{latest_month}.csv"
     if path.exists():
         return load_maya_file(path)
-    return download_maya(save_to=path)
+    return None
 
 df = get_data(_data_signature())
 
@@ -137,8 +137,6 @@ st.sidebar.markdown(
         <hr style="border: 0; border-top: 1px solid #333852; margin-top: 5px; margin-bottom: 10px;">
         <a href="#-דשבורד-קרנות"><span style="color: #FFB347;">מדדים מרכזיים (KPIs) 📊</span></a>
         <a href="#-לפי-מנהל-קרן"><span style="color: #B39DDB;">לפי מנהל קרן 👥</span></a>
-        <a href="#-לפי-סוג-קרן"><span style="color: #4DA6FF;">לפי סוג קרן 📋</span></a>
-        <a href="#-לפי-הוסטינג"><span style="color: #81C784;">לפי הוסטינג 🤝</span></a>
         <a href="#-מחקהסל-לפי-סוג-נכס"><span style="color: #F48FB1;">מחקה/סל לפי סוג נכס 🎯</span></a>
         <a href="#changes"><span style="color: #FF8A65;">שינויים בין חודשים 🔄</span></a>
         <hr style="border: 0; border-top: 1px solid #333852; margin-top: 10px; margin-bottom: 15px;">
@@ -305,11 +303,11 @@ else:
     d = month_diff(df, m_old, m_new)
 
     if use_maya:
-        try:
-            with st.spinner("מוריד נתונים מהמאיה..."):
-                d = cross_check_with_maya(d, get_maya(mts[-1]))
-        except Exception as e:
-            st.warning(f"הצלבת המאיה נכשלה: {e}")
+        maya_df = get_maya(mts[-1])
+        if maya_df is None:
+            st.info("אין snapshot של המאיה לחודש זה")
+        else:
+            d = cross_check_with_maya(d, maya_df)
 
     k1, k2 = st.columns(2)
     k1.metric("יצאו (פורקו/נסגרו)", f"{d['counts']['exited']:,}")
@@ -340,9 +338,10 @@ st.sidebar.download_button(
 
 with st.sidebar.expander("🔍 אימות נתונים מול המאיה"):
     st.markdown("**מול המאיה**")
-    try:
-        with st.spinner("מוריד נתונים מהמאיה..."):
-            maya_df = get_maya(month)
+    maya_df = get_maya(month)
+    if maya_df is None:
+        st.info("אין snapshot של המאיה לחודש זה")
+    else:
         maya_result = reconcile(base, maya_df)
         n_maya_not_sql = maya_result["counts"]["maya_not_sql"]
         n_sql_not_maya = maya_result["counts"]["sql_not_maya"]
@@ -355,8 +354,6 @@ with st.sidebar.expander("🔍 אימות נתונים מול המאיה"):
             st.caption(f"בקובץ נתונים ולא במאיה: {n_sql_not_maya}")
             if n_sql_not_maya:
                 st.caption(", ".join(str(x) for x in maya_result["sql_not_maya"]["FundNumber"]))
-    except Exception as e:
-        st.warning(f"הצלבת המאיה נכשלה: {e}")
 
     st.markdown("---")
 

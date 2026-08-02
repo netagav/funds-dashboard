@@ -84,7 +84,13 @@ def load_data() -> pd.DataFrame:
     df = _load_from_sql() if USE_SQL else _load_from_csv()
 
     # נרמול eom למחרוזת 'YYYY-MM-DD' כדי שהמסנן יעבוד עקבי
-    df["eom"] = pd.to_datetime(df["eom"]).dt.strftime("%Y-%m-%d")
+    df["eom"] = pd.to_datetime(
+        df["eom"], format="mixed", dayfirst=True, errors="coerce"
+    ).dt.strftime("%Y-%m-%d")
+
+    if df["eom"].isna().any():
+        n_bad = df["eom"].isna().sum()
+        print(f"אזהרה: {n_bad} שורות עם eom לא-תקין הפכו ל-NaT")
 
     # ודא שהעמדות המספריות אכן מספריות
     for c in ["fdAUM", "ManagerFee", "DistClassificationVal",
