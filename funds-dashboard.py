@@ -4,6 +4,7 @@
 
 import io
 import contextlib
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -13,6 +14,10 @@ from processing import (
     add_helper_columns, kpis, agg_by, validate,
     FUND_TYPES, ASSET_LABEL,
 )
+from month_diff import available_months, month_diff, cross_check_with_maya
+from maya_check import download_maya, load_maya_file
+
+MAYA_DIR = Path(__file__).resolve().parent / "data" / "maya"
 
 st.set_page_config(page_title="דשבורד קרנות", layout="wide")
 
@@ -84,6 +89,15 @@ def get_data() -> pd.DataFrame:
     df = load_data()
     return add_helper_columns(df)
 
+@st.cache_data(show_spinner=False)
+def get_maya(latest_month: str) -> pd.DataFrame:
+    """קורא את snapshot המאיה של החודש מהגיט (קפוא). אם אין קובץ לחודש הזה —
+    מוריד חי פעם אחת (fallback לא-קפוא, עד שירוץ refresh_maya וייעשה commit)."""
+    path = MAYA_DIR / f"maya_{latest_month}.csv"
+    if path.exists():
+        return load_maya_file(path)
+    return download_maya(save_to=path)
+
 df = get_data()
 
 # --------------------------- סיידבר: ניווט, חודש ואימות ---------------------------
@@ -119,6 +133,7 @@ st.sidebar.markdown(
         <a href="#-לפי-סוג-קרן"><span style="color: #4DA6FF;">לפי סוג קרן 📋</span></a>
         <a href="#-לפי-הוסטינג"><span style="color: #81C784;">לפי הוסטינג 🤝</span></a>
         <a href="#-מחקהסל-לפי-סוג-נכס"><span style="color: #F48FB1;">מחקה/סל לפי סוג נכס 🎯</span></a>
+        <a href="#changes"><span style="color: #FF8A65;">שינויים בין חודשים 🔄</span></a>
         <hr style="border: 0; border-top: 1px solid #333852; margin-top: 10px; margin-bottom: 15px;">
     </div>
     """,
@@ -285,6 +300,48 @@ tr = base[base["FundType"].isin(["מחקה", "סל"])].copy()
 tr["grp"] = tr["FundType"] + " " + tr["AssetClass"].map(ASSET_LABEL)
 a = agg_by(tr, "grp").sort_values("aum_m", ascending=False)
 render(a, "grp", "קטגוריה", market_share=True)
+
+st.divider()
+
+# --------------------------- שינויים בין חודשים (נכנסו / יצאו) ---------------------------
+st.subheader("🔄 שינויים בין חודשים", anchor="changes")
+
+mts = available_months(df)
+if len(mts) < 2:
+    st.info("צריך לפחות שני חודשים בנתונים כדי להשוות. הסעיף יופיע אוטומטית כשייכנס החודש הבא.")
+else:
+    c1, c2, c3 = st.columns([2, 2, 2])
+    with c1:
+        m_old = st.selectbox("חודש בסיס", mts, index=len(mts) - 2, key="diff_old")
+    with c2:
+        m_new = st.selectbox("חודש להשוואה", mts, index=len(mts) - 1, key="diff_new")
+    with c3:
+        use_maya = st.checkbox("הצלב מול המאיה", key="diff_maya")
+
+    d = month_diff(df, m_old, m_new)
+
+    if use_maya:
+        try:
+            with st.spinner("מוריד נתונים מהמאיה..."):
+                d = cross_check_with_maya(d, get_maya(mts[-1]))
+        except Exception as e:
+            st.warning(f"הצלבת המאיה נכשלה: {e}")
+
+    k1, k2 = st.columns(2)
+    k1.metric("יצאו (פורקו/נסגרו)", f"{d['counts']['exited']:,}")
+    k2.metric("נכנסו (חדשות)", f"{d['counts']['entered']:,}")
+
+    st.markdown("**קרנות שיצאו** (היו בחודש הבסיס, אינן בחודש ההשוואה):")
+    st.dataframe(
+        d["exited"], use_container_width=True, hide_index=True,
+        height=(min(len(d["exited"]), 12) + 1) * 35
+    )
+
+    st.markdown("**קרנות שנכנסו** (בחודש ההשוואה, לא היו בבסיס):")
+    st.dataframe(
+        d["entered"], use_container_width=True, hide_index=True,
+        height=(min(len(d["entered"]), 12) + 1) * 35
+    )
 
 # --------------------------- ייצוא נתונים ואימות (בסיידבר) ---------------------------
 csv_data = base.to_csv(index=False).encode('utf-8-sig')

@@ -1,0 +1,45 @@
+name: Monthly update (Maya snapshot + reconciliation)
+
+on:
+  push:
+    paths:
+      - "data/funds_*.csv"      # רץ אוטומטית כשקובץ חודש חדש נדחף (למשל ע"י Make)
+  workflow_dispatch: {}         # אפשר גם להפעיל ידנית מלשונית Actions
+  schedule:
+    - cron: "0 5 2 * *"         # וגם ב-2 לכל חודש בבוקר, כגיבוי
+
+# מונע שתי ריצות מקבילות שידרסו זו את זו
+concurrency:
+  group: monthly-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write           # נדרש כדי לדחוף את ה-snapshot והדוחות חזרה לריפו
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # מוריד snapshot של המאיה לחודש האחרון (רק אם עדיין אין לו קובץ = קפוא)
+      - name: Refresh Maya snapshot
+        run: python refresh_maya.py
+
+      # מריץ את ההשוואה וכותב דוחות ל-data/reports/
+      - name: Run Maya reconciliation
+        run: python maya_check.py
+
+      - name: Commit snapshot + reports
+        run: |
+          git config user.name  "maya-bot"
+          git config user.email "maya-bot@users.noreply.github.com"
+          git add data/maya/ data/reports/ 2>/dev/null || true
+          git commit -m "Monthly update: Maya snapshot + reconciliation" || echo "no changes"
+          git push
