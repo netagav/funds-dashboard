@@ -138,7 +138,7 @@ st.sidebar.markdown(
         <a href="#-דשבורד-קרנות"><span style="color: #FFB347;">מדדים מרכזיים (KPIs) 📊</span></a>
         <a href="#-לפי-מנהל-קרן"><span style="color: #B39DDB;">לפי מנהל קרן 👥</span></a>
         <a href="#-מחקהסל-לפי-סוג-נכס"><span style="color: #F48FB1;">מחקה/סל לפי סוג נכס 🎯</span></a>
-        <a href="#changes"><span style="color: #FF8A65;">שינויים בין חודשים 🔄</span></a>
+        <a href="#changes"><span style="color: #FF8A65;">שינוי לעומת החודש הקודם 🔄</span></a>
         <hr style="border: 0; border-top: 1px solid #333852; margin-top: 10px; margin-bottom: 15px;">
     </div>
     """,
@@ -241,13 +241,16 @@ def render_diff(frame: pd.DataFrame):
     out = frame[fixed_cols + extra_cols].copy()
     if "FundBno" in out.columns:
         out["FundBno"] = out["FundBno"].apply(lambda v: str(int(v)) if pd.notna(v) else "")
+    if "fdAUM" in out.columns:
+        out["fdAUM"] = out["fdAUM"] / 1_000_000
+        out = out.rename(columns={"fdAUM": "נכסים (₪M)"})
     out = out[out.columns[::-1]]
 
     total_row = {c: "" for c in out.columns}
     if "FundBno" in out.columns:
         total_row["FundBno"] = 'סה"כ'
-    if "fdAUM" in out.columns:
-        total_row["fdAUM"] = frame["fdAUM"].sum(skipna=True)
+    if "נכסים (₪M)" in out.columns:
+        total_row["נכסים (₪M)"] = out["נכסים (₪M)"].sum(skipna=True)
     out = pd.concat([out, pd.DataFrame([total_row])], ignore_index=True)
 
     def highlight_total(row):
@@ -256,10 +259,10 @@ def render_diff(frame: pd.DataFrame):
         return [''] * len(row)
 
     st.dataframe(
-        out.style.apply(highlight_total, axis=1),
+        out.style.format({"נכסים (₪M)": "{:,.0f}"}).apply(highlight_total, axis=1),
         use_container_width=True,
         hide_index=True,
-        height=(min(len(out), 13) + 1) * 35
+        height=(len(frame) + 2) * 35
     )
 
 # --------------------------- טבלה 1 - לפי מנהל ---------------------------
@@ -313,29 +316,31 @@ render(a, "grp", "קטגוריה", market_share=True)
 
 st.divider()
 
-# --------------------------- שינויים בין חודשים (נכנסו / יצאו) ---------------------------
-st.subheader("🔄 שינויים בין חודשים", anchor="changes")
+# --------------------------- שינוי לעומת החודש הקודם ---------------------------
+st.subheader("🔄 שינוי לעומת החודש הקודם", anchor="changes")
 
 mts = available_months(df)
 if len(mts) < 2:
     st.info("צריך לפחות שני חודשים בנתונים כדי להשוות. הסעיף יופיע אוטומטית כשייכנס החודש הבא.")
 else:
-    c1, c2 = st.columns([2, 2])
-    with c1:
-        m_new = st.selectbox("חודש להשוואה", mts, index=len(mts) - 1, key="diff_new")
-    diff_idx = mts.index(m_new)
+    diff_idx = mts.index(month)
 
     if diff_idx == 0:
         st.info("אין חודש קודם להשוואה")
     else:
-        m_old = mts[diff_idx - 1]
-        with c2:
-            use_maya = st.checkbox("הצלב מול המאיה", key="diff_maya")
+        m_prev = mts[diff_idx - 1]
+        st.caption(
+            f"ההשוואה היא מול החודש הקודם "
+            f"(<span style='direction: ltr; unicode-bidi: embed;'>{m_prev}</span>)",
+            unsafe_allow_html=True,
+        )
 
-        d = month_diff(df, m_old, m_new)
+        use_maya = st.checkbox("הצלב מול המאיה", key="diff_maya")
+
+        d = month_diff(df, m_prev, month)
 
         if use_maya:
-            maya_df = get_maya(m_new)
+            maya_df = get_maya(month)
             if maya_df is None:
                 st.info("אין snapshot של המאיה לחודש זה")
             else:
