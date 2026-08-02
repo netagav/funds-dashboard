@@ -15,7 +15,7 @@ from processing import (
     FUND_TYPES, ASSET_LABEL,
 )
 from month_diff import available_months, month_diff, cross_check_with_maya
-from maya_check import download_maya, load_maya_file
+from maya_check import download_maya, load_maya_file, reconcile
 
 MAYA_DIR = Path(__file__).resolve().parent / "data" / "maya"
 
@@ -168,7 +168,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.divider()
 
 # --------------------------- עוזר תצוגה ---------------------------
-def render(g, label_col, label_name, market_share=False):
+def render(g, label_col, label_name, market_share=False, highlight_row=None):
     g_copy = g.copy()
     
     total_aum_raw = g_copy["aum"].sum()
@@ -218,6 +218,8 @@ def render(g, label_col, label_name, market_share=False):
     def highlight_total(row):
         if row[label_name] == 'סה"כ':
             return ['background-color: #2A2A35; font-weight: bold; color: #4DA6FF'] * len(row)
+        if highlight_row is not None and row[label_name] == highlight_row:
+            return ['color: #FFA500; font-weight: bold'] * len(row)
         return [''] * len(row)
 
     st.dataframe(
@@ -263,32 +265,7 @@ if mgr_super_opt: # אם הרשימה לא ריקה
 
 # יצירת הטבלה והצגתה
 m = agg_by(scope_mgr, "ManagerCmp").sort_values("aum_m", ascending=False)
-render(m, "ManagerCmp", "מנהל", market_share=True)
-
-st.divider()
-
-# --------------------------- טבלה 2 - לפי סוג קרן ---------------------------
-st.subheader("📋 לפי סוג קרן")
-col_f4, col_f5 = st.columns([2, 4])
-with col_f4:
-    ft_host_opt = st.selectbox("סינון הוסטינג", ["הכל", "ללא הוסטינג", "הוסטינג"], key="ft_host")
-
-scope_ft = base if ft_host_opt == "הכל" else base[base["IsHosting"] == ft_host_opt]
-ft = agg_by(scope_ft, "FundType").set_index("FundType").reindex(FUND_TYPES).reset_index()
-ft = ft.sort_values("aum_m", ascending=False)
-render(ft, "FundType", "סוג קרן")
-
-st.divider()
-
-# --------------------------- טבלה 3 - לפי הוסטינג ---------------------------
-st.subheader("🤝 לפי הוסטינג")
-col_f6, col_f7 = st.columns([2, 4])
-with col_f6:
-    host_type_opt = st.selectbox("סינון סוג קרן", ["הכל", "מחקה", "סל", "כספית", "אקטיבית"], key="host_type")
-
-scope_host = base if host_type_opt == "הכל" else base[base["FundType"] == host_type_opt]
-h = agg_by(scope_host, "IsHosting").sort_values("aum_m", ascending=False)
-render(h, "IsHosting", "הוסטינג")
+render(m, "ManagerCmp", "מנהל", market_share=True, highlight_row="מגדל")
 
 st.divider()
 
@@ -354,13 +331,47 @@ st.sidebar.download_button(
     use_container_width=True
 )
 
-with st.sidebar.expander("🔍 בדיקת אימות (יוני 2026)"):
-    ref_month = "2026-06-30"
-    if ref_month in months:
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            ok = validate(df[df["eom"] == ref_month])
-        st.code(buf.getvalue())
-        st.success("הכול תואם ✓") if ok else st.error("יש סטייה — בדוק REV_TO_M")
+with st.sidebar.expander("🔍 אימות נתונים מול המאיה"):
+    st.markdown("**מול המאיה**")
+    try:
+        with st.spinner("מוריד נתונים מהמאיה..."):
+            maya_df = get_maya(month)
+        maya_result = reconcile(base, maya_df)
+        n_maya_not_sql = maya_result["counts"]["maya_not_sql"]
+        n_sql_not_maya = maya_result["counts"]["sql_not_maya"]
+        if n_maya_not_sql == 0 and n_sql_not_maya == 0:
+            st.success("לא קיים פער — כל הקרנות תואמות למאיה")
+        else:
+            st.caption(f"במאיה ולא בקובץ נתונים: {n_maya_not_sql}")
+            if n_maya_not_sql:
+                st.caption(", ".join(str(x) for x in maya_result["maya_not_sql"]["FundNumber"]))
+            st.caption(f"בקובץ נתונים ולא במאיה: {n_sql_not_maya}")
+            if n_sql_not_maya:
+                st.caption(", ".join(str(x) for x in maya_result["sql_not_maya"]["FundNumber"]))
+    except Exception as e:
+        st.warning(f"הצלבת המאיה נכשלה: {e}")
+
+    st.markdown("---")
+
+    if len(months) < 2:
+        st.info("צריך שני חודשים כדי להשוות")
     else:
-        st.info(f"חודש הייחוס {ref_month} לא נטען עדיין.")
+        idx = months.index(month)
+        if idx == 0:
+            st.markdown("**מול החודש הקודם**")
+            st.info("אין חודש קודם לחודש הנבחר להשוואה")
+        else:
+            m_prev = months[idx - 1]
+            st.markdown(f"**מול החודש הקודם ({m_prev} ← {month})**")
+            d_prev = month_diff(df, m_prev, month)
+            n_entered = d_prev["counts"]["entered"]
+            n_exited = d_prev["counts"]["exited"]
+            if n_entered == 0 and n_exited == 0:
+                st.info("אין שינוי בין החודשים")
+            else:
+                st.caption(f"נכנסו: {n_entered}")
+                if n_entered:
+                    st.caption(", ".join(str(x) for x in d_prev["entered"]["FundBno"]))
+                st.caption(f"יצאו: {n_exited}")
+                if n_exited:
+                    st.caption(", ".join(str(x) for x in d_prev["exited"]["FundBno"]))
