@@ -12,6 +12,8 @@ import os
 import glob
 import pandas as pd
 
+from backfill_missing import backfill_missing_shortname
+
 USE_SQL = False
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -97,5 +99,12 @@ def load_data() -> pd.DataFrame:
               "Revenues", "Net_Fees", "Net_Revenues"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # רשת ביטחון: השלמת שורות עם ShortName ריק בחודש האחרון בלבד (מול
+    # החודש שלפניו) - לקבצים שהוזנו בלי לעבור דרך ה-GitHub Action. לא
+    # נוגעת בשאר ההיסטוריה בכל rerun.
+    latest_eom = df["eom"].max()
+    if pd.notna(latest_eom):
+        df = backfill_missing_shortname(latest_eom, df, df)
 
     return df

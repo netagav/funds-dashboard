@@ -28,6 +28,12 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
+      # משחזר שורות עם ShortName ריק בקובץ החודש החדש מהחודש הקודם בפועל
+      # (ראה backfill_missing.py) - חייב לרוץ ראשון, לפני שהשוואת המאיה
+      # מתבססת על הנתונים.
+      - name: Backfill missing ShortName from previous month
+        run: python backfill_missing.py
+
       # מוריד snapshot של המאיה לחודש האחרון (רק אם עדיין אין לו קובץ = קפוא)
       - name: Refresh Maya snapshot
         run: python refresh_maya.py
@@ -40,6 +46,6 @@ jobs:
         run: |
           git config user.name  "maya-bot"
           git config user.email "maya-bot@users.noreply.github.com"
-          git add data/maya/ data/reports/ 2>/dev/null || true
-          git commit -m "Monthly update: Maya snapshot + reconciliation" || echo "no changes"
+          git add data/maya/ data/reports/ data/funds_*.csv 2>/dev/null || true
+          git commit -m "Monthly update: backfill + Maya snapshot + reconciliation" || echo "no changes"
           git push
