@@ -5,6 +5,7 @@
 import io
 import os
 import glob
+import math
 import contextlib
 from pathlib import Path
 
@@ -238,9 +239,13 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.divider()
 
 # --------------------------- עוזר תצוגה ---------------------------
-def render(g, label_col, label_name, market_share=False, highlight_row=None):
+def render(g, label_col, label_name, market_share=False, highlight_row=None, market_share_bar=True):
     g_copy = g.copy()
     g_copy = g_copy.sort_values("aum_m", ascending=False)  # = מיון לפי נתח שוק יורד (יחס קבוע ל-aum_m)
+
+    # מקסימום נתח השוק בין השורות בפועל (בלי שורת הסה"כ) - לקנה המידה של הבר
+    if market_share:
+        individual_max_share = float(g_copy["market_share_pct"].max())
 
     total_aum_raw = g_copy["aum"].sum()
     total_rev_raw = g_copy["rev"].sum()
@@ -280,13 +285,20 @@ def render(g, label_col, label_name, market_share=False, highlight_row=None):
     }
 
     column_config = None
-    if market_share:
-        max_share = float(out["נתח שוק %"].max())
+    if market_share and market_share_bar:
+        # max_value לפי המקסימום בפועל בין השורות (בלי שורת הסה"כ), מעוגל כלפי
+        # מעלה לכפולת-5 נוחה - כך שהבר של המנהל הגדול ביותר ימלא כמעט את כל
+        # התא וההבדלים בין המנהלים נראים ברור, במקום שכולם יידחסו מול 100%.
+        # שורת הסה"כ (100%) חורגת מה-max_value בכוונה: הטקסט המספרי שלה
+        # ("100.00%") עדיין מוצג נכון, והבר שלה פשוט מוצג מלא (clamped).
+        max_share = math.ceil(individual_max_share / 5) * 5
         column_config = {
             "נתח שוק %": st.column_config.ProgressColumn(
                 "נתח שוק %", format="%.2f%%", min_value=0, max_value=max_share,
             ),
         }
+    elif market_share:
+        format_dict["נתח שוק %"] = "{:,.2f}"
 
     def highlight_total(row):
         if row[label_name] == 'סה"כ':
@@ -381,7 +393,7 @@ st.subheader("🎯 מחקה/סל לפי סוג נכס")
 tr = base[base["FundType"].isin(["מחקה", "סל"])].copy()
 tr["grp"] = tr["FundType"] + " " + tr["AssetClass"].map(ASSET_LABEL)
 a = agg_by(tr, "grp").sort_values("aum_m", ascending=False)
-render(a, "grp", "קטגוריה", market_share=True)
+render(a, "grp", "קטגוריה", market_share=True, market_share_bar=False)
 
 st.divider()
 
