@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 from data_source import load_data
@@ -122,27 +123,62 @@ def _dark_layout(fig: go.Figure, height: int = 320, legend: bool = True) -> go.F
     return fig
 
 
-def _trend_chart(x, series: dict, colors: dict, y_title: str = "", pct: bool = False) -> go.Figure:
-    """גרף קו למגמה היסטורית. 'סה"כ' תמיד בכחול המבטא, עבה ומקווקו כדי
-    לבלוט; שאר הסדרות (מנהלים שנבחרו) בפלטת הזהות הקבועה."""
-    fig = go.Figure()
+def _trend_chart(
+    x, series: dict, colors: dict, y_title: str = "", pct: bool = False, dual_axis: bool = False
+) -> go.Figure:
+    """גרף קו למגמה היסטורית - קו חלק (spline) עם markers זעירים (לא
+    מוסרים לגמרי: הכרחי כדי שנקודת נתון בודדת, למשל מנהל עם חודש יחיד
+    בהיסטוריה, עדיין תוצג ולא תיעלם). 'סה"כ' תמיד בכחול המבטא, עבה
+    ומקווקו כדי לבלוט; שאר הסדרות (מנהלים שנבחרו) בפלטת הזהות הקבועה.
+
+    dual_axis=True מעביר את קווי המנהלים לציר Y משני (secondary_y) -
+    לשימוש כשהסקאלות שונות מהותית (למשל נכסים: סה"כ ~800K מול מנהל
+    בודד באלפים בודדים). לא מפעיל ציר משני אם לא נבחר אף מנהל (רק
+    'סה"כ' קיים) - אין בו צורך כשיש סדרה אחת בלבד.
+    """
+    entity_names = [n for n in series if n != 'סה"כ']
+    use_dual = dual_axis and bool(entity_names)
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]]) if use_dual else go.Figure()
     suffix = "%" if pct else ""
     for name, y in series.items():
         is_total = name == 'סה"כ'
-        fig.add_trace(go.Scatter(
+        trace = go.Scatter(
             x=x, y=y, mode="lines+markers", name=name,
             line=dict(
                 width=3 if is_total else 2,
                 color=CHART_ACCENT if is_total else colors.get(name, CHART_ACCENT),
                 dash="dash" if is_total else "solid",
+                shape="spline",
+                smoothing=0.8,
             ),
-            marker=dict(size=6 if is_total else 5),
+            marker=dict(size=4 if is_total else 3),
             connectgaps=False,
             hovertemplate=f"%{{x|%Y-%m}}<br>{name}: %{{y:,.2f}}{suffix}<extra></extra>",
-        ))
+        )
+        if use_dual:
+            fig.add_trace(trace, secondary_y=not is_total)
+        else:
+            fig.add_trace(trace)
+
     fig.update_xaxes(tickformat="%Y-%m")
-    fig.update_yaxes(title_text=y_title)
-    return _dark_layout(fig, legend=True)
+    fig = _dark_layout(fig, legend=True)
+
+    if use_dual:
+        # מיושם אחרי _dark_layout כדי שהצבע הייחודי לכל ציר לא יידרס
+        # ע"י ה-color האחיד ש-_dark_layout מגדיר לכל צירי ה-Y
+        fig.update_yaxes(
+            title_text=f'סה"כ ({y_title})', secondary_y=False,
+            title_font=dict(color=CHART_ACCENT), tickfont=dict(color=CHART_ACCENT),
+        )
+        fig.update_yaxes(
+            title_text=f"מנהל בודד ({y_title})", secondary_y=True,
+            showgrid=False, tickfont=dict(color=CHART_TEXT),
+        )
+    else:
+        fig.update_yaxes(title_text=y_title)
+
+    return fig
 
 
 def _data_signature() -> tuple:
@@ -466,7 +502,7 @@ def _series_for(col: str) -> dict:
 
 st.markdown("**נכסים כוללים (₪M)**")
 st.plotly_chart(
-    _trend_chart(x, _series_for("aum_m"), entity_colors, y_title="₪M"),
+    _trend_chart(x, _series_for("aum_m"), entity_colors, y_title="₪M", dual_axis=True),
     use_container_width=True,
 )
 
