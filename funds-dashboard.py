@@ -93,8 +93,16 @@ st.markdown(
 CHART_BG = "#1E1E2E"
 CHART_GRID = "#2A2A35"
 CHART_TEXT = "#E0E0E0"
-CHART_ACCENT = "#4DA6FF"     # כחול - מבטא ראשי, תואם ל-KPIs
-CHART_ACCENT_2 = "#81C784"   # ירוק - לשימוש עקבי ב"נטו" מול "ברוטו"
+CHART_ACCENT = "#4DA6FF"     # כחול - מבטא ראשי, שמור לקו "סה"כ" בגרפי המגמה
+# פלטת זהות למנהלים/סוגי קרן שנבחרו בגרפי המגמה - סדר קבוע, בלי כחול (שמור ל"סה"כ")
+ENTITY_PALETTE = [
+    "#81C784", "#FFB347", "#B39DDB", "#F48FB1", "#FF8A65",
+    "#4DD0E1", "#FFE082", "#CE93D8", "#90A4AE", "#A1887F",
+]
+
+
+def _entity_colors(entities) -> dict:
+    return {str(e): ENTITY_PALETTE[i % len(ENTITY_PALETTE)] for i, e in enumerate(entities)}
 
 
 def _dark_layout(fig: go.Figure, height: int = 320, legend: bool = True) -> go.Figure:
@@ -114,21 +122,27 @@ def _dark_layout(fig: go.Figure, height: int = 320, legend: bool = True) -> go.F
     return fig
 
 
-def _line_chart(x, series: dict, y_title: str = "", pct: bool = False) -> go.Figure:
-    """גרף קו - עד 3 סדרות, צבעים קבועים (לא מחזוריים)."""
-    colors = [CHART_ACCENT, CHART_ACCENT_2, "#FFB347"]
+def _trend_chart(x, series: dict, colors: dict, y_title: str = "", pct: bool = False) -> go.Figure:
+    """גרף קו למגמה היסטורית. 'סה"כ' תמיד בכחול המבטא, עבה ומקווקו כדי
+    לבלוט; שאר הסדרות (מנהלים/סוגי קרן שנבחרו) בפלטת הזהות הקבועה."""
     fig = go.Figure()
     suffix = "%" if pct else ""
-    for i, (name, y) in enumerate(series.items()):
+    for name, y in series.items():
+        is_total = name == 'סה"כ'
         fig.add_trace(go.Scatter(
             x=x, y=y, mode="lines+markers", name=name,
-            line=dict(width=2, color=colors[i % len(colors)]),
-            marker=dict(size=6),
+            line=dict(
+                width=3 if is_total else 2,
+                color=CHART_ACCENT if is_total else colors.get(name, CHART_ACCENT),
+                dash="dash" if is_total else "solid",
+            ),
+            marker=dict(size=6 if is_total else 5),
+            connectgaps=False,
             hovertemplate=f"%{{x|%Y-%m}}<br>{name}: %{{y:,.2f}}{suffix}<extra></extra>",
         ))
     fig.update_xaxes(tickformat="%Y-%m")
     fig.update_yaxes(title_text=y_title)
-    return _dark_layout(fig, legend=len(series) > 1)
+    return _dark_layout(fig, legend=True)
 
 
 def _data_signature() -> tuple:
@@ -183,7 +197,6 @@ st.sidebar.markdown(
         <a href="#-דשבורד-קרנות"><span style="color: #FFB347;">מדדים מרכזיים (KPIs) 📊</span></a>
         <a href="#-לפי-מנהל-קרן"><span style="color: #B39DDB;">לפי מנהל קרן 👥</span></a>
         <a href="#-מחקהסל-לפי-סוג-נכס"><span style="color: #F48FB1;">מחקה/סל לפי סוג נכס 🎯</span></a>
-        <a href="#changes"><span style="color: #FF8A65;">שינוי לעומת החודש הקודם 🔄</span></a>
         <hr style="border: 0; border-top: 1px solid #333852; margin-top: 10px; margin-bottom: 15px;">
     </div>
     """,
@@ -400,21 +413,20 @@ st.divider()
 # --------------------------- מגמה היסטורית ---------------------------
 st.subheader("📈 מגמה היסטורית", anchor="trend")
 
-with st.expander("סינון מגמה היסטורית", expanded=False):
-    col_t1, col_t2, col_t3 = st.columns([2, 2, 3])
-    with col_t1:
-        trend_type_opt = st.multiselect(
-            "סינון סוג קרן", fund_types, placeholder="הכל (בחר כדי לסנן)", key="trend_type"
-        )
-    with col_t2:
-        trend_host_opt = st.selectbox(
-            "סינון הוסטינג", ["הכל", "ללא הוסטינג", "הוסטינג"], key="trend_host"
-        )
-    with col_t3:
-        managers_all = sorted(df["ManagerCmp"].dropna().unique().tolist())
-        trend_mgr_opt = st.multiselect(
-            "סינון מנהל קרן", managers_all, placeholder="הכל (בחר כדי לסנן)", key="trend_mgr"
-        )
+col_t1, col_t2, col_t3 = st.columns([2, 2, 3])
+with col_t1:
+    trend_type_opt = st.multiselect(
+        "סינון סוג קרן", fund_types, placeholder="הכל (בחר כדי לסנן)", key="trend_type"
+    )
+with col_t2:
+    trend_host_opt = st.selectbox(
+        "סינון הוסטינג", ["הכל", "ללא הוסטינג", "הוסטינג"], key="trend_host"
+    )
+with col_t3:
+    managers_all = sorted(df["ManagerCmp"].dropna().unique().tolist())
+    trend_mgr_opt = st.multiselect(
+        "סינון מנהל קרן", managers_all, placeholder="הכל (בחר כדי לסנן)", key="trend_mgr"
+    )
 
 scope_trend = df.copy()
 if trend_type_opt:
@@ -424,66 +436,116 @@ if trend_host_opt != "הכל":
 if trend_mgr_opt:
     scope_trend = scope_trend[scope_trend["ManagerCmp"].isin(trend_mgr_opt)]
 
-hist = agg_by(scope_trend, "eom").sort_values("eom").copy()
-hist["eom_dt"] = pd.to_datetime(hist["eom"])
+# בחירת מסנן הפיצול לקווים: אם גם סוג קרן וגם מנהל נבחרו יחד, מפצלים
+# לפי זה שבו נבחרו יותר פריטים (כדי לא ליצור מכפלה של כל הצירופים);
+# בשוויון מעדיפים מנהל קרן. הוסטינג תמיד נשאר פילטר רגיל, לא מפצל.
+if trend_mgr_opt and trend_type_opt:
+    if len(trend_mgr_opt) >= len(trend_type_opt):
+        split_col, split_entities = "ManagerCmp", trend_mgr_opt
+    else:
+        split_col, split_entities = "FundType", trend_type_opt
+elif trend_mgr_opt:
+    split_col, split_entities = "ManagerCmp", trend_mgr_opt
+elif trend_type_opt:
+    split_col, split_entities = "FundType", trend_type_opt
+else:
+    split_col, split_entities = None, []
+
+entity_colors = _entity_colors(split_entities)
+all_eoms = sorted(scope_trend["eom"].unique())
+x = pd.to_datetime(all_eoms)
+
+# agg_by לפי eom פעם אחת לכל ישות (כולל "סה"כ") - משמש לכל שלושת
+# גרפי המגמה יחד, כדי לא לחשב אגרגציה בנפרד לכל גרף
+hist_frames = {'סה"כ': agg_by(scope_trend, "eom").set_index("eom").reindex(all_eoms)}
+for ent in split_entities:
+    sub = scope_trend[scope_trend[split_col] == ent]
+    if sub.empty:
+        hist_frames[str(ent)] = pd.DataFrame(
+            index=all_eoms, columns=["aum_m", "fee_gross_pct", "fee_net_pct"], dtype="float64"
+        )
+    else:
+        hist_frames[str(ent)] = agg_by(sub, "eom").set_index("eom").reindex(all_eoms)
+
+
+def _series_for(col: str) -> dict:
+    return {name: frame[col] for name, frame in hist_frames.items()}
+
 
 st.markdown("**נכסים כוללים (₪M)**")
 st.plotly_chart(
-    _line_chart(hist["eom_dt"], {"נכסים": hist["aum_m"]}, y_title="₪M"),
+    _trend_chart(x, _series_for("aum_m"), entity_colors, y_title="₪M"),
     use_container_width=True,
 )
 
-st.markdown("**דמי ניהול ברוטו/נטו %**")
+st.markdown("**דמי ניהול ברוטו %**")
 st.plotly_chart(
-    _line_chart(
-        hist["eom_dt"],
-        {"ברוטו": hist["fee_gross_pct"], "נטו": hist["fee_net_pct"]},
-        y_title="%", pct=True,
-    ),
+    _trend_chart(x, _series_for("fee_gross_pct"), entity_colors, y_title="%", pct=True),
+    use_container_width=True,
+)
+
+st.markdown("**דמי ניהול נטו %**")
+st.plotly_chart(
+    _trend_chart(x, _series_for("fee_net_pct"), entity_colors, y_title="%", pct=True),
     use_container_width=True,
 )
 
 st.divider()
 
 # --------------------------- שינוי לעומת החודש הקודם ---------------------------
-st.subheader("🔄 שינוי לעומת החודש הקודם", anchor="changes")
+st.markdown(
+    """
+    <style>
+        /* קלף "שינוי לעומת החודש הקודם" - בולט משאר הדשבורד, לא סתם expander גנרי */
+        .st-key-changes-card,
+        .st-key-changes-card [data-testid="stExpander"] {
+            background-color: rgba(255, 138, 101, 0.06);
+            border: 1px solid #FF8A65;
+            border-right: 4px solid #FF8A65;
+            border-radius: 10px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-mts = available_months(df)
-if len(mts) < 2:
-    st.info("צריך לפחות שני חודשים בנתונים כדי להשוות. הסעיף יופיע אוטומטית כשייכנס החודש הבא.")
-else:
-    diff_idx = mts.index(month)
-
-    if diff_idx == 0:
-        st.info("אין חודש קודם להשוואה")
+with st.expander("🔄 שינוי לעומת החודש הקודם", expanded=False, key="changes-card"):
+    mts = available_months(df)
+    if len(mts) < 2:
+        st.info("צריך לפחות שני חודשים בנתונים כדי להשוות. הסעיף יופיע אוטומטית כשייכנס החודש הבא.")
     else:
-        m_prev = mts[diff_idx - 1]
-        st.caption(
-            f"ההשוואה היא מול החודש הקודם "
-            f"(<span style='direction: ltr; unicode-bidi: embed;'>{m_prev}</span>)",
-            unsafe_allow_html=True,
-        )
+        diff_idx = mts.index(month)
 
-        use_maya = st.checkbox("הצלב מול המאיה", key="diff_maya")
+        if diff_idx == 0:
+            st.info("אין חודש קודם להשוואה")
+        else:
+            m_prev = mts[diff_idx - 1]
+            st.caption(
+                f"ההשוואה היא מול החודש הקודם "
+                f"(<span style='direction: ltr; unicode-bidi: embed;'>{m_prev}</span>)",
+                unsafe_allow_html=True,
+            )
 
-        d = month_diff(df, m_prev, month)
+            use_maya = st.checkbox("הצלב מול המאיה", key="diff_maya")
 
-        if use_maya:
-            maya_df = get_maya(month)
-            if maya_df is None:
-                st.info("אין snapshot של המאיה לחודש זה")
-            else:
-                d = cross_check_with_maya(d, maya_df)
+            d = month_diff(df, m_prev, month)
 
-        k1, k2 = st.columns(2)
-        k1.metric("יצאו (פורקו/נסגרו)", f"{d['counts']['exited']:,}")
-        k2.metric("נכנסו (חדשות)", f"{d['counts']['entered']:,}")
+            if use_maya:
+                maya_df = get_maya(month)
+                if maya_df is None:
+                    st.info("אין snapshot של המאיה לחודש זה")
+                else:
+                    d = cross_check_with_maya(d, maya_df)
 
-        st.markdown("**קרנות שיצאו** (היו בחודש הבסיס, אינן בחודש ההשוואה):")
-        render_diff(d["exited"])
+            k1, k2 = st.columns(2)
+            k1.metric("יצאו (פורקו/נסגרו)", f"{d['counts']['exited']:,}")
+            k2.metric("נכנסו (חדשות)", f"{d['counts']['entered']:,}")
 
-        st.markdown("**קרנות שנכנסו** (בחודש ההשוואה, לא היו בבסיס):")
-        render_diff(d["entered"])
+            st.markdown("**קרנות שיצאו** (היו בחודש הבסיס, אינן בחודש ההשוואה):")
+            render_diff(d["exited"])
+
+            st.markdown("**קרנות שנכנסו** (בחודש ההשוואה, לא היו בבסיס):")
+            render_diff(d["entered"])
 
 # --------------------------- ייצוא נתונים ואימות (בסיידבר) ---------------------------
 csv_data = base.to_csv(index=False).encode('utf-8-sig')
