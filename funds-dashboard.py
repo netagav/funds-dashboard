@@ -94,7 +94,7 @@ CHART_BG = "#1E1E2E"
 CHART_GRID = "#2A2A35"
 CHART_TEXT = "#E0E0E0"
 CHART_ACCENT = "#4DA6FF"     # כחול - מבטא ראשי, שמור לקו "סה"כ" בגרפי המגמה
-# פלטת זהות למנהלים/סוגי קרן שנבחרו בגרפי המגמה - סדר קבוע, בלי כחול (שמור ל"סה"כ")
+# פלטת זהות למנהלים שנבחרו בגרפי המגמה - סדר קבוע, בלי כחול (שמור ל"סה"כ")
 ENTITY_PALETTE = [
     "#81C784", "#FFB347", "#B39DDB", "#F48FB1", "#FF8A65",
     "#4DD0E1", "#FFE082", "#CE93D8", "#90A4AE", "#A1887F",
@@ -124,7 +124,7 @@ def _dark_layout(fig: go.Figure, height: int = 320, legend: bool = True) -> go.F
 
 def _trend_chart(x, series: dict, colors: dict, y_title: str = "", pct: bool = False) -> go.Figure:
     """גרף קו למגמה היסטורית. 'סה"כ' תמיד בכחול המבטא, עבה ומקווקו כדי
-    לבלוט; שאר הסדרות (מנהלים/סוגי קרן שנבחרו) בפלטת הזהות הקבועה."""
+    לבלוט; שאר הסדרות (מנהלים שנבחרו) בפלטת הזהות הקבועה."""
     fig = go.Figure()
     suffix = "%" if pct else ""
     for name, y in series.items():
@@ -428,44 +428,36 @@ with col_t3:
         "סינון מנהל קרן", managers_all, placeholder="הכל (בחר כדי לסנן)", key="trend_mgr"
     )
 
-scope_trend = df.copy()
+# scope_base מסונן לפי סוג קרן/הוסטינג בלבד - לא לפי מנהל קרן. קו
+# ה"סה"כ" תמיד מחושב ממנו, כדי שהוא יישאר יציב וימשיך לכסות את כל
+# טווח התאריכים גם כשנבחר מנהל עם היסטוריה חלקית (למשל בעקבות שינוי
+# שם באמצע התקופה) - זה גם מה שמתקן את אי-הרציפות שהייתה בגרפים.
+scope_base = df.copy()
 if trend_type_opt:
-    scope_trend = scope_trend[scope_trend["FundType"].isin(trend_type_opt)]
+    scope_base = scope_base[scope_base["FundType"].isin(trend_type_opt)]
 if trend_host_opt != "הכל":
-    scope_trend = scope_trend[scope_trend["IsHosting"] == trend_host_opt]
-if trend_mgr_opt:
-    scope_trend = scope_trend[scope_trend["ManagerCmp"].isin(trend_mgr_opt)]
+    scope_base = scope_base[scope_base["IsHosting"] == trend_host_opt]
 
-# בחירת מסנן הפיצול לקווים: אם גם סוג קרן וגם מנהל נבחרו יחד, מפצלים
-# לפי זה שבו נבחרו יותר פריטים (כדי לא ליצור מכפלה של כל הצירופים);
-# בשוויון מעדיפים מנהל קרן. הוסטינג תמיד נשאר פילטר רגיל, לא מפצל.
-if trend_mgr_opt and trend_type_opt:
-    if len(trend_mgr_opt) >= len(trend_type_opt):
-        split_col, split_entities = "ManagerCmp", trend_mgr_opt
-    else:
-        split_col, split_entities = "FundType", trend_type_opt
-elif trend_mgr_opt:
-    split_col, split_entities = "ManagerCmp", trend_mgr_opt
-elif trend_type_opt:
-    split_col, split_entities = "FundType", trend_type_opt
-else:
-    split_col, split_entities = None, []
+# ממירים eom ל-datetime ומיינים לפי הערך הכרונולוגי עצמו (לא לפי מחרוזת) -
+# all_eoms (מחרוזות ISO, לאינדוקס לתוך פלט agg_by) ו-x (datetime, לציר
+# הגרף) נשארים באותו סדר מובטח.
+eom_dt_sorted = pd.to_datetime(scope_base["eom"].unique()).sort_values()
+all_eoms = eom_dt_sorted.strftime("%Y-%m-%d").tolist()
+x = eom_dt_sorted
 
-entity_colors = _entity_colors(split_entities)
-all_eoms = sorted(scope_trend["eom"].unique())
-x = pd.to_datetime(all_eoms)
+entity_colors = _entity_colors(trend_mgr_opt)
 
-# agg_by לפי eom פעם אחת לכל ישות (כולל "סה"כ") - משמש לכל שלושת
-# גרפי המגמה יחד, כדי לא לחשב אגרגציה בנפרד לכל גרף
-hist_frames = {'סה"כ': agg_by(scope_trend, "eom").set_index("eom").reindex(all_eoms)}
-for ent in split_entities:
-    sub = scope_trend[scope_trend[split_col] == ent]
+# agg_by לפי eom פעם אחת לכל ישות (סה"כ + כל מנהל שנבחר) - משמש לכל
+# שלושת גרפי המגמה יחד, כדי לא לחשב אגרגציה בנפרד לכל גרף
+hist_frames = {'סה"כ': agg_by(scope_base, "eom").set_index("eom").reindex(all_eoms)}
+for mgr in trend_mgr_opt:
+    sub = scope_base[scope_base["ManagerCmp"] == mgr]
     if sub.empty:
-        hist_frames[str(ent)] = pd.DataFrame(
+        hist_frames[str(mgr)] = pd.DataFrame(
             index=all_eoms, columns=["aum_m", "fee_gross_pct", "fee_net_pct"], dtype="float64"
         )
     else:
-        hist_frames[str(ent)] = agg_by(sub, "eom").set_index("eom").reindex(all_eoms)
+        hist_frames[str(mgr)] = agg_by(sub, "eom").set_index("eom").reindex(all_eoms)
 
 
 def _series_for(col: str) -> dict:
