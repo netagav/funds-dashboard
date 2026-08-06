@@ -9,12 +9,13 @@ import contextlib
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from data_source import load_data
 from processing import (
     add_helper_columns, kpis, agg_by, validate,
-    FUND_TYPES, ASSET_LABEL,
+    ASSET_LABEL,
 )
 from month_diff import available_months, month_diff, cross_check_with_maya
 from maya_check import load_maya_file, reconcile
@@ -87,6 +88,48 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# --------------------------- עוזרי גרפים (Plotly, עיצוב כהה תואם) ---------------------------
+CHART_BG = "#1E1E2E"
+CHART_GRID = "#2A2A35"
+CHART_TEXT = "#E0E0E0"
+CHART_ACCENT = "#4DA6FF"     # כחול - מבטא ראשי, תואם ל-KPIs
+CHART_ACCENT_2 = "#81C784"   # ירוק - לשימוש עקבי ב"נטו" מול "ברוטו"
+
+
+def _dark_layout(fig: go.Figure, height: int = 320, legend: bool = True) -> go.Figure:
+    fig.update_layout(
+        height=height,
+        paper_bgcolor=CHART_BG,
+        plot_bgcolor=CHART_BG,
+        font=dict(family="Arial, Segoe UI, sans-serif", color=CHART_TEXT, size=13),
+        margin=dict(l=10, r=10, t=30, b=10),
+        showlegend=legend,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                     bgcolor="rgba(0,0,0,0)"),
+        hoverlabel=dict(bgcolor=CHART_GRID, font_color=CHART_TEXT),
+    )
+    fig.update_xaxes(showgrid=False, color=CHART_TEXT, linecolor=CHART_GRID)
+    fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID, gridwidth=1, zeroline=False, color=CHART_TEXT)
+    return fig
+
+
+def _line_chart(x, series: dict, y_title: str = "", pct: bool = False) -> go.Figure:
+    """גרף קו - עד 3 סדרות, צבעים קבועים (לא מחזוריים)."""
+    colors = [CHART_ACCENT, CHART_ACCENT_2, "#FFB347"]
+    fig = go.Figure()
+    suffix = "%" if pct else ""
+    for i, (name, y) in enumerate(series.items()):
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="lines+markers", name=name,
+            line=dict(width=2, color=colors[i % len(colors)]),
+            marker=dict(size=6),
+            hovertemplate=f"%{{x|%Y-%m}}<br>{name}: %{{y:,.2f}}{suffix}<extra></extra>",
+        ))
+    fig.update_xaxes(tickformat="%Y-%m")
+    fig.update_yaxes(title_text=y_title)
+    return _dark_layout(fig, legend=len(series) > 1)
+
+
 def _data_signature() -> tuple:
     files = sorted(glob.glob(str(FUNDS_DATA_DIR / "funds_*.csv")))
     return tuple((f, os.path.getmtime(f)) for f in files)
@@ -106,6 +149,7 @@ def get_maya(latest_month: str):
     return None
 
 df = get_data(_data_signature())
+df["year"] = pd.to_datetime(df["eom"]).dt.year
 
 # --------------------------- סיידבר: ניווט, חודש ואימות ---------------------------
 
@@ -145,14 +189,35 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 
-# 2. מסנן תקופה (אוחד ללא כותרת כדי לחסוך מקום)
+# 2. מסנן תקופה: שנה ואז חודש (אוחד ללא כותרת כדי לחסוך מקום)
 months = sorted(df["eom"].unique())
 
 if not months:
     st.warning("לא נמצאו נתונים. אנא ודא שקובץ ה-CSV קיים בתיקיית data.")
     st.stop()
-    
-month = st.sidebar.selectbox("🗓️ מסנן תקופה", months, index=len(months) - 1)
+
+years = sorted(df["year"].unique())
+
+
+def _last_month_of_year(y):
+    yr_months = sorted(df.loc[df["year"] == y, "eom"].unique())
+    return yr_months[-1]
+
+
+def _on_year_change():
+    st.session_state["month_select"] = _last_month_of_year(st.session_state["year_select"])
+
+
+year = st.sidebar.selectbox(
+    "📅 שנה", years, index=len(years) - 1, key="year_select", on_change=_on_year_change
+)
+
+month_options = sorted(df.loc[df["year"] == year, "eom"].unique())
+
+if "month_select" not in st.session_state or st.session_state["month_select"] not in month_options:
+    st.session_state["month_select"] = month_options[-1]
+
+month = st.sidebar.selectbox("🗓️ חודש", month_options, key="month_select")
 
 base = df[df["eom"] == month]
 
@@ -175,51 +240,54 @@ st.divider()
 # --------------------------- עוזר תצוגה ---------------------------
 def render(g, label_col, label_name, market_share=False, highlight_row=None):
     g_copy = g.copy()
-    
+    g_copy = g_copy.sort_values("aum_m", ascending=False)  # = מיון לפי נתח שוק יורד (יחס קבוע ל-aum_m)
+
     total_aum_raw = g_copy["aum"].sum()
     total_rev_raw = g_copy["rev"].sum()
     total_nrev_raw = g_copy["nrev"].sum()
-    
+
     total_fee_gross = (total_rev_raw / total_aum_raw * 10000) if total_aum_raw else 0.0
     total_fee_net = (total_nrev_raw / total_aum_raw * 10000) if total_aum_raw else 0.0
-    
+
     total_row = {
         label_col: 'סה"כ',
         "aum_m": g_copy["aum_m"].sum(),
-        "rev_gross_m": g_copy["rev_gross_m"].sum(),
-        "rev_net_m": g_copy["rev_net_m"].sum(),
         "fee_gross_pct": total_fee_gross,
         "fee_net_pct": total_fee_net,
     }
-    
+
     if market_share:
         total_row["market_share_pct"] = g_copy["market_share_pct"].sum()
-        
+
     g_copy = pd.concat([g_copy, pd.DataFrame([total_row])], ignore_index=True)
 
     out = pd.DataFrame({
         label_name: g_copy[label_col],
         "נכסים (₪M)": g_copy["aum_m"],
-        "הכנסות ברוטו (₪M)": g_copy["rev_gross_m"],
-        "הכנסות נטו (₪M)": g_copy["rev_net_m"],
         "דמי ניהול ברוטו %": g_copy["fee_gross_pct"],
         "דמי ניהול נטו %": g_copy["fee_net_pct"],
     })
-    
+
     if market_share:
         out["נתח שוק %"] = g_copy["market_share_pct"]
-        
+
     out = out[out.columns[::-1]]
-    
+
     format_dict = {
         "נכסים (₪M)": "{:,.0f}",
-        "הכנסות ברוטו (₪M)": "{:,.2f}",
-        "הכנסות נטו (₪M)": "{:,.2f}",
         "דמי ניהול ברוטו %": "{:,.2f}",
         "דמי ניהול נטו %": "{:,.2f}",
-        "נתח שוק %": "{:,.2f}"
     }
-    
+
+    column_config = None
+    if market_share:
+        max_share = float(out["נתח שוק %"].max())
+        column_config = {
+            "נתח שוק %": st.column_config.ProgressColumn(
+                "נתח שוק %", format="%.2f%%", min_value=0, max_value=max_share,
+            ),
+        }
+
     def highlight_total(row):
         if row[label_name] == 'סה"כ':
             return ['background-color: #2A2A35; font-weight: bold; color: #4DA6FF'] * len(row)
@@ -229,7 +297,8 @@ def render(g, label_col, label_name, market_share=False, highlight_row=None):
 
     st.dataframe(
         out.style.format(format_dict).apply(highlight_total, axis=1),
-        use_container_width=True, 
+        column_config=column_config,
+        use_container_width=True,
         hide_index=True,
         height=(len(out) + 1) * 35
     )
@@ -313,6 +382,54 @@ tr = base[base["FundType"].isin(["מחקה", "סל"])].copy()
 tr["grp"] = tr["FundType"] + " " + tr["AssetClass"].map(ASSET_LABEL)
 a = agg_by(tr, "grp").sort_values("aum_m", ascending=False)
 render(a, "grp", "קטגוריה", market_share=True)
+
+st.divider()
+
+# --------------------------- מגמה היסטורית ---------------------------
+st.subheader("📈 מגמה היסטורית", anchor="trend")
+
+with st.expander("סינון מגמה היסטורית", expanded=False):
+    col_t1, col_t2, col_t3 = st.columns([2, 2, 3])
+    with col_t1:
+        trend_type_opt = st.multiselect(
+            "סינון סוג קרן", fund_types, placeholder="הכל (בחר כדי לסנן)", key="trend_type"
+        )
+    with col_t2:
+        trend_host_opt = st.selectbox(
+            "סינון הוסטינג", ["הכל", "ללא הוסטינג", "הוסטינג"], key="trend_host"
+        )
+    with col_t3:
+        managers_all = sorted(df["ManagerCmp"].dropna().unique().tolist())
+        trend_mgr_opt = st.multiselect(
+            "סינון מנהל קרן", managers_all, placeholder="הכל (בחר כדי לסנן)", key="trend_mgr"
+        )
+
+scope_trend = df.copy()
+if trend_type_opt:
+    scope_trend = scope_trend[scope_trend["FundType"].isin(trend_type_opt)]
+if trend_host_opt != "הכל":
+    scope_trend = scope_trend[scope_trend["IsHosting"] == trend_host_opt]
+if trend_mgr_opt:
+    scope_trend = scope_trend[scope_trend["ManagerCmp"].isin(trend_mgr_opt)]
+
+hist = agg_by(scope_trend, "eom").sort_values("eom").copy()
+hist["eom_dt"] = pd.to_datetime(hist["eom"])
+
+st.markdown("**נכסים כוללים (₪M)**")
+st.plotly_chart(
+    _line_chart(hist["eom_dt"], {"נכסים": hist["aum_m"]}, y_title="₪M"),
+    use_container_width=True,
+)
+
+st.markdown("**דמי ניהול ברוטו/נטו %**")
+st.plotly_chart(
+    _line_chart(
+        hist["eom_dt"],
+        {"ברוטו": hist["fee_gross_pct"], "נטו": hist["fee_net_pct"]},
+        y_title="%", pct=True,
+    ),
+    use_container_width=True,
+)
 
 st.divider()
 
