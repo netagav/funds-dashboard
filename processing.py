@@ -26,6 +26,19 @@ EXCLUDED_MANAGERS = {
     "INVESCO INVESTMENT",
 }
 
+# איחוד וריאציות כתיב/מינוח של אותו SuperClass בפועל, לשם אחיד אחד.
+# אושר ידנית לאחר בדיקת repr() על כל הערכים הייחודיים בקבצי המקור -
+# ראה השוואת הזוגות בסיכום המיפוי (יש זוגות דומים שנשארו בכוונה
+# נפרדים כי הם קטגוריות שונות באמת, לא רק הבדל כתיב).
+SUPERCLASS_ALIASES = {
+    'אג"ח בארץ - חברות והמרה': 'אג"ח בארץ- חברות והמרה',
+    'אג"ח בארץ כללי': 'אג"ח בארץ - כללי',
+    'אג"ח בארץ - מדינה': 'אג"ח בארץ- מדינה',
+    'אג"ח בחו"ל ': 'אג"ח בחו"ל',   # עם רווח נגרר במקור
+    "מניות בישראל": "מניות בארץ",
+    "קרן גידור": "קרן גידור בנאמנות",
+}
+
 # מספרי הייחוס (יוני 2026, כל היקום) לאימות עצמי
 REFERENCE = {
     "aum_m": 826_511,
@@ -46,6 +59,11 @@ def add_helper_columns(df: pd.DataFrame) -> pd.DataFrame:
     # אגרגציה, כדי שכל טבלה/מסנן/גרף שמשתמש ב-ManagerCmp יראה תמונה מאוחדת
     df["ManagerCmp"] = df["ManagerCmp"].replace(MANAGER_ALIASES)
     df = df[~df["ManagerCmp"].isin(EXCLUDED_MANAGERS)].copy()
+
+    # איחוד וריאציות SuperClass, ואז השמטת שורות בלי SuperClass בכלל -
+    # לפני חישוב AssetClass (תלוי ב-SuperClass) וכל אגרגציה אחרת
+    df["SuperClass"] = df["SuperClass"].replace(SUPERCLASS_ALIASES)
+    df = df[df["SuperClass"].notna()].copy()
 
     for c in ["Is_Caspit", "IsKerenSal", "IsTracking"]:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
